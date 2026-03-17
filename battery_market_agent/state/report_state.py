@@ -79,3 +79,9 @@ class ReportState(TypedDict):
     # ── 최종 출력 ───────────────────────────────────────────────────────────
     final_report: str
     """sections를 보고서 양식(마크다운)으로 렌더링한 최종 텍스트."""
+
+    report_md_path: str
+    """저장된 마크다운 보고서 파일 경로."""
+
+    report_pdf_path: str
+    """저장된 PDF 보고서 파일 경로."""

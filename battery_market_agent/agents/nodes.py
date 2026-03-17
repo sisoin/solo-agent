@@ -10,8 +10,11 @@ LangGraph 노드 함수 모음.
 - compare_node        : 두 분석 결과 비교 및 종합
 - summarize_node      : 최종 구조화 보고서 생성
 """
+from langchain_core.documents import Document
 from langgraph.types import Send
 
+from battery_market_agent.config import Settings
+from battery_market_agent.rag import BatteryRAG
 from battery_market_agent.state import BatteryMarketState
 from battery_market_agent.agents.market_analysis_agent import market_analysis_agent
 from battery_market_agent.agents.swot_analysis_agent import swot_analysis_agent
@@ -26,6 +29,14 @@ from battery_market_agent.tools import (
 )
 
 COMPANIES = ["LG에너지솔루션", "CATL"]
+
+DEFAULT_RETRIEVE_QUERIES = [
+    "배터리 시장 규모 성장률 전망",
+    "전기차 배터리 수요 지역별 동향",
+    "리튬 코발트 니켈 원자재 가격",
+    "배터리 산업 규제 정책",
+    "LG에너지솔루션 CATL 시장 점유율 경쟁",
+]
 
 COMPANY_TOOLS = [
     search_battery_market_data,
@@ -42,8 +53,30 @@ COMPANY_TOOLS = [
 # ---------------------------------------------------------------------------
 
 def retrieve_node(state: BatteryMarketState) -> dict:
-    """TODO: BatteryRAG.retrieve() 호출 후 retrieved_docs로 상태 업데이트."""
-    raise NotImplementedError
+    """
+    공통 RAG 검색 노드.
+
+    branch_companies(Send) 전에 한 번 실행되어 배터리 시장 관련
+    공통 문서를 검색하고 retrieved_docs에 저장한다.
+    이후 각 company_analysis_agent에 그대로 전달된다.
+    """
+    rag = BatteryRAG.get_instance(Settings())
+
+    all_docs: list[Document] = []
+    for query in DEFAULT_RETRIEVE_QUERIES:
+        docs = rag.retrieve(query)
+        all_docs.extend(docs)
+
+    # source + page 기준 중복 제거
+    seen: set[str] = set()
+    unique_docs: list[Document] = []
+    for doc in all_docs:
+        key = f"{doc.metadata.get('source', '')}_{doc.metadata.get('page', '')}"
+        if key not in seen:
+            seen.add(key)
+            unique_docs.append(doc)
+
+    return {"retrieved_docs": unique_docs}
 
 
 def analyze_company_node(state: BatteryMarketState) -> dict:

@@ -35,6 +35,12 @@ class MarketAnalysisState(TypedDict):
     news_items: Annotated[list[str], add]
     """최신 배터리 산업 뉴스·이슈 목록. 검색 호출마다 누적(add)된다."""
 
+    # ── 출처 ───────────────────────────────────────────────────────────────────
+    market_sources: dict[str, list[dict[str, str]]]
+    """기업별 출처 목록. 키: 회사명, 값: [{"title": str, "url": str, "tool": str}, ...]
+    tool 값: "search_web" | "fetch_google_news"
+    URL은 실제 접속 가능한 주소만 포함한다."""
+
     # ── 최종 결과 ──────────────────────────────────────────────────────────────
     market_analysis: str
     """LLM이 위 수집 데이터를 종합한 최종 시장 분석 보고서 (한국어, 항목별 구조화)."""

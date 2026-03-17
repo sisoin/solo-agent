@@ -22,7 +22,7 @@ def fetch_google_news(query: str, period: str = "7d", max_results: int = 10) -> 
         max_results: 최대 결과 수
 
     Returns:
-        뉴스 기사 목록 (제목, 날짜, 링크)
+        뉴스 기사 목록 (제목, 날짜, 출처 URL)
     """
     gn = GoogleNews(lang="ko", period=period)
     gn.search(query)
@@ -31,9 +31,13 @@ def fetch_google_news(query: str, period: str = "7d", max_results: int = 10) -> 
     if not results:
         return f"'{query}'에 대한 뉴스를 찾을 수 없습니다."
 
-    lines = [f"[{i+1}] {r.get('title', '제목 없음')} ({r.get('date', '')})\n    {r.get('link', '')}"
-             for i, r in enumerate(results)]
-    return "\n".join(lines)
+    lines = []
+    for i, r in enumerate(results):
+        title = r.get("title", "제목 없음")
+        date = r.get("date", "")
+        link = r.get("link", "")
+        lines.append(f"[{i+1}] {title} ({date})\n출처: {link}")
+    return "\n\n".join(lines)
 
 
 @tool
@@ -46,7 +50,7 @@ def search_web(query: str, max_results: int = 5) -> str:
         max_results: 최대 결과 수
 
     Returns:
-        검색 결과 요약
+        검색 결과 (제목, 출처 URL, 내용 요약)
     """
     search = TavilySearch(
         max_results=max_results,
@@ -56,8 +60,25 @@ def search_web(query: str, max_results: int = 5) -> str:
         # search_depth="advanced",
         # include_answer=True,
     )
-    result = search.invoke(query)
-    return str(result)
+    results = search.invoke(query)
+
+    if not results:
+        return f"'{query}'에 대한 검색 결과가 없습니다."
+
+    if isinstance(results, str):
+        return results
+
+    lines = []
+    for i, r in enumerate(results, 1):
+        if not isinstance(r, dict):
+            lines.append(str(r))
+            continue
+        title = r.get("title", "제목 없음")
+        url = r.get("url", "")
+        content = r.get("content", "")
+        lines.append(f"[{i}] {title}\n출처: {url}\n{content}")
+
+    return "\n\n".join(lines)
 
 
 @tool

@@ -4,7 +4,7 @@ BatteryRAG — Qdrant 기반 RAG 파이프라인 (싱글톤).
 구성:
     - 문서 로딩  : PDFPlumberLoader
     - 텍스트 분할 : RecursiveCharacterTextSplitter
-    - 임베딩     : OpenAIEmbeddings (text-embedding-3-small)
+    - 임베딩     : HuggingFaceEmbeddings (BAAI/bge-m3, 1024차원)
     - 벡터 저장소 : QdrantVectorStore (http://localhost:6333)
     - 검색       : 유사도 검색 + 선택적 company 메타데이터 필터
 
@@ -14,9 +14,9 @@ BatteryRAG — Qdrant 기반 RAG 파이프라인 (싱글톤).
 from pathlib import Path
 from threading import Lock
 
-from langchain_community.document_loaders import PDFPlumberLoader
+from langchain_community.document_loaders import PDFPlumberLoader, WebBaseLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langchain_core.documents import Document
 from qdrant_client import QdrantClient
@@ -28,7 +28,7 @@ from battery_market_agent.config import Settings
 class BatteryRAG:
     """Qdrant 기반 배터리 시장 문서 RAG 파이프라인 (싱글톤)."""
 
-    VECTOR_SIZE = 1536  # text-embedding-3-small 차원
+    VECTOR_SIZE = 1024  # BAAI/bge-m3 차원
 
     _instance: "BatteryRAG | None" = None
     _lock: Lock = Lock()
@@ -51,9 +51,9 @@ class BatteryRAG:
         self._initialized = True
         self.settings = settings or Settings()
 
-        self._embeddings = OpenAIEmbeddings(
-            model=self.settings.embedding_model,
-            api_key=self.settings.openai_api_key,
+        self._embeddings = HuggingFaceEmbeddings(
+            model_name=self.settings.embedding_model,
+            encode_kwargs={"normalize_embeddings": True},
         )
         self._client = QdrantClient(url=self.settings.qdrant_url)
         self._splitter = RecursiveCharacterTextSplitter(
@@ -119,6 +119,22 @@ class BatteryRAG:
                     page.metadata["company"] = company
             docs.extend(pages)
 
+        return docs
+
+    def load_from_url(self, url: str, company: str | None = None) -> list[Document]:
+        """
+        URL에서 웹 페이지를 로딩하고 Document 리스트로 반환한다.
+
+        Args:
+            url    : 수집할 웹 페이지 URL
+            company: 메타데이터에 기록할 회사명 (필터링에 사용)
+        """
+        loader = WebBaseLoader(url)
+        docs = loader.load()
+        for doc in docs:
+            doc.metadata["source"] = url
+            if company:
+                doc.metadata["company"] = company
         return docs
 
     def build_index(self, documents: list[Document]) -> None:

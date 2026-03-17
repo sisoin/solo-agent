@@ -4,32 +4,125 @@
 각 함수는 @tool (LangChain)로 데코레이팅되어
 에이전트의 도구 목록에 직접 전달됩니다.
 """
+import datetime
 from langchain_core.tools import tool
+import yfinance as yf
 
+# 원자재 이름 → yfinance 티커 매핑
+# 선물 계약 또는 대표 ETF 활용
+_MATERIAL_TICKERS: dict[str, tuple[str, str]] = {
+    # 한국어 키워드 → (티커, 설명)
+    "리튬":   ("LIT",   "Global X Lithium & Battery Tech ETF (LIT)"),
+    "lithium": ("LIT",  "Global X Lithium & Battery Tech ETF (LIT)"),
+    "코발트": ("COBF",  "Cobalt Blue Holdings (COBF)"),
+    "cobalt":  ("COBF", "Cobalt Blue Holdings (COBF)"),
+    "니켈":   ("NICKEL=F", "LME 니켈 선물 (NICKEL=F)"),
+    "nickel":  ("NICKEL=F", "LME 니켈 선물 (NICKEL=F)"),
+    "구리":   ("HG=F",  "COMEX 구리 선물 (HG=F)"),
+    "copper":  ("HG=F", "COMEX 구리 선물 (HG=F)"),
+    "망간":   ("MNO",   "Consolidation Manganese Corp (MNO.AX 대용)"),
+    "manganese": ("MNO", "Consolidation Manganese Corp"),
+}
 
-@tool
-def search_battery_market_data(query: str) -> str:
-    """배터리 시장 규모, 성장률, 세그먼트 데이터를 검색합니다."""
-    # TODO: 구현 — 웹 검색 또는 벡터 저장소 조회
-    raise NotImplementedError
-
-
-@tool
-def analyze_competitors(company_names: list[str]) -> str:
-    """지정된 배터리 기업들의 경쟁 포지셔닝을 분석합니다."""
-    # TODO: 구현 — 구조화된 경쟁사 분석
-    raise NotImplementedError
+_PERIOD_MAP: dict[str, str] = {
+    "1d": "5d", "7d": "1mo", "1m": "1mo", "3m": "3mo",
+    "6m": "6mo", "1y": "1y", "2y": "2y", "5y": "5y",
+}
 
 
 @tool
 def fetch_price_trends(material: str, period: str = "1y") -> str:
-    """배터리 원자재(예: 리튬, 코발트)의 역사적 가격 추이를 조회합니다."""
-    # TODO: 구현 — yfinance / Finance DataReader
-    raise NotImplementedError
+    """
+    배터리 원자재(리튬·코발트·니켈 등)의 가격 추이를 조회합니다.
+
+    Args:
+        material: 원자재 이름 (예: '리튬', '코발트', '니켈', 'lithium')
+        period: 조회 기간 (예: '1m', '3m', '6m', '1y', '2y')
+
+    Returns:
+        최근 가격 통계 및 추이 요약 텍스트
+    """
+    key = material.strip().lower()
+    ticker_info = _MATERIAL_TICKERS.get(key)
+
+    # 키워드 부분 매칭 fallback
+    if ticker_info is None:
+        for k, v in _MATERIAL_TICKERS.items():
+            if k in key or key in k:
+                ticker_info = v
+                break
+
+    if ticker_info is None:
+        return (
+            f"'{material}'에 대한 티커 매핑이 없습니다. "
+            f"지원 원자재: {', '.join(_MATERIAL_TICKERS.keys())}"
+        )
+
+    ticker_symbol, label = ticker_info
+    yf_period = _PERIOD_MAP.get(period, "1y")
+
+    try:
+        data = yf.Ticker(ticker_symbol).history(period=yf_period)
+    except Exception as e:
+        return f"[{label}] 데이터 조회 실패: {e}"
+
+    if data.empty:
+        return f"[{label}] {yf_period} 기간 데이터가 없습니다."
+
+    close = data["Close"]
+    latest      = close.iloc[-1]
+    oldest      = close.iloc[0]
+    high        = close.max()
+    low         = close.min()
+    pct_change  = (latest - oldest) / oldest * 100
+    latest_date = data.index[-1].strftime("%Y-%m-%d")
+
+    # 월별 종가 샘플 (최대 12포인트)
+    monthly = close.resample("ME").last().tail(12)
+    trend_lines = [f"  {d.strftime('%Y-%m')}: {v:.2f}" for d, v in monthly.items()]
+
+    return (
+        f"[{label}]\n"
+        f"기간: {yf_period} | 기준일: {latest_date}\n"
+        f"최신가: {latest:.2f} | 기간 시작가: {oldest:.2f}\n"
+        f"기간 고점: {high:.2f} | 기간 저점: {low:.2f}\n"
+        f"기간 수익률: {pct_change:+.1f}%\n\n"
+        f"월별 종가 추이:\n" + "\n".join(trend_lines)
+    )
+
+
+@tool
+def search_battery_market_data(query: str) -> str:
+    """
+    배터리 시장 규모, 성장률, 세그먼트 데이터를 검색합니다.
+    (현재 웹 검색 위임 — search_web 도구를 대신 사용하세요.)
+    """
+    return (
+        "이 도구는 현재 웹 검색으로 대체됩니다. "
+        "search_web 도구로 동일한 쿼리를 실행하세요: " + query
+    )
+
+
+@tool
+def analyze_competitors(company_names: list[str]) -> str:
+    """
+    지정된 배터리 기업들의 경쟁 포지셔닝을 분석합니다.
+    (현재 웹 검색 위임 — search_web 도구를 대신 사용하세요.)
+    """
+    names = ", ".join(company_names)
+    return (
+        f"이 도구는 현재 웹 검색으로 대체됩니다. "
+        f"search_web 도구로 '{names} 경쟁 포지셔닝 비교'를 검색하세요."
+    )
 
 
 @tool
 def summarize_regulations(region: str) -> str:
-    """특정 지역의 배터리 관련 규제 및 정책을 요약합니다."""
-    # TODO: 구현 — 규제 문서에 대한 RAG 검색
-    raise NotImplementedError
+    """
+    특정 지역의 배터리 관련 규제 및 정책을 요약합니다.
+    (현재 웹 검색 위임 — search_web 도구를 대신 사용하세요.)
+    """
+    return (
+        f"이 도구는 현재 웹 검색으로 대체됩니다. "
+        f"search_web 도구로 '{region} 배터리 규제 정책'을 검색하세요."
+    )

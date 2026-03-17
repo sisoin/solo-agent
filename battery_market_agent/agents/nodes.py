@@ -76,6 +76,13 @@ def retrieve_node(state: BatteryMarketState) -> dict:
             seen.add(key)
             unique_docs.append(doc)
 
+    print(f"[retrieve_node] RAG 검색 완료: 총 {len(unique_docs)}개 문서 (쿼리 {len(DEFAULT_RETRIEVE_QUERIES)}개)")
+    for i, doc in enumerate(unique_docs, 1):
+        source = doc.metadata.get("source", "unknown")
+        page = doc.metadata.get("page", "")
+        chars = len(doc.page_content)
+        print(f"  [{i}] {source} p.{page} ({chars}자)")
+
     return {"retrieved_docs": unique_docs}
 
 

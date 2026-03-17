@@ -8,26 +8,60 @@
 
 처리 흐름:
     1. generate_sections_node : LLM.with_structured_output으로 섹션 데이터 생성
-    2. render_report_node     : 섹션 데이터를 보고서 마크다운 양식으로 렌더링
+    2. render_report_node     : 섹션 데이터를 보고서 마크다운 양식으로 렌더링 + 파일 저장
 
 입력 (ReportState):
     company_report    : 기업 분석 결과 {"LG에너지솔루션": "...", "CATL": "..."}
     comparison_report : 비교 분석 결과 (SWOT 포함)
 
 출력 (ReportState):
-    sections     : 구조화된 섹션 데이터 (중간 산출물)
-    final_report : 최종 마크다운 보고서
+    sections        : 구조화된 섹션 데이터 (중간 산출물)
+    final_report    : 최종 마크다운 보고서
+    report_md_path  : 저장된 마크다운 파일 경로 (docs/report_<timestamp>.md)
+    report_pdf_path : 저장된 PDF 파일 경로 (docs/report_<timestamp>.pdf)
 """
-from langchain_anthropic import ChatAnthropic
+import os
+import re
+from datetime import datetime
+from pathlib import Path
+
+from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
+)
+from reportlab.lib import colors
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from battery_market_agent.config import Settings
 from battery_market_agent.state.report_state import ReportState, ReportSections
 
+# ---------------------------------------------------------------------------
+# 한글 폰트 등록 (macOS 기본 폰트 사용)
+# ---------------------------------------------------------------------------
+_FONT_PATHS = [
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    "/Library/Fonts/Arial Unicode.ttf",
+]
+
+_FONT_NAME = "Helvetica"  # 폴백: 내장 폰트
+for _fp in _FONT_PATHS:
+    if os.path.exists(_fp):
+        try:
+            pdfmetrics.registerFont(TTFont("AppleGothic", _fp))
+            _FONT_NAME = "AppleGothic"
+        except Exception:
+            pass
+        break
+
 _settings = Settings()
-_llm = ChatAnthropic(
+_llm = ChatOpenAI(
     model=_settings.model_name,
-    api_key=_settings.anthropic_api_key,
+    api_key=_settings.openai_api_key,
 )
 _structured_llm = _llm.with_structured_output(ReportSections)
 
@@ -198,7 +232,85 @@ def render_report_node(state: ReportState) -> dict:
 
 {_references()}
 """
-    return {"final_report": report.strip()}
+    final_report = report.strip()
+
+    # ── 파일 저장 ────────────────────────────────────────────────────────────
+    docs_dir = Path(__file__).resolve().parents[2] / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    md_path  = docs_dir / f"report_{timestamp}.md"
+    pdf_path = docs_dir / f"report_{timestamp}.pdf"
+
+    # 마크다운 저장
+    md_path.write_text(final_report, encoding="utf-8")
+
+    # PDF 저장
+    _save_pdf(final_report, pdf_path)
+
+    return {
+        "final_report":    final_report,
+        "report_md_path":  str(md_path),
+        "report_pdf_path": str(pdf_path),
+    }
+
+
+# ---------------------------------------------------------------------------
+# PDF 변환 헬퍼
+# ---------------------------------------------------------------------------
+
+def _save_pdf(markdown_text: str, pdf_path: Path) -> None:
+    """마크다운 텍스트를 PDF로 변환하여 저장한다."""
+    doc = SimpleDocTemplate(
+        str(pdf_path),
+        pagesize=A4,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    fn = _FONT_NAME
+
+    style_h1 = ParagraphStyle("h1", fontName=fn, fontSize=18, spaceAfter=6, spaceBefore=12, leading=22)
+    style_h2 = ParagraphStyle("h2", fontName=fn, fontSize=14, spaceAfter=4, spaceBefore=10, leading=18)
+    style_h3 = ParagraphStyle("h3", fontName=fn, fontSize=12, spaceAfter=3, spaceBefore=8, leading=16)
+    style_body = ParagraphStyle("body", fontName=fn, fontSize=10, spaceAfter=4, leading=14)
+    style_li   = ParagraphStyle("li",   fontName=fn, fontSize=10, spaceAfter=2, leading=14, leftIndent=12)
+
+    story = []
+
+    for line in markdown_text.splitlines():
+        stripped = line.rstrip()
+
+        if stripped.startswith("### "):
+            story.append(Paragraph(stripped[4:], style_h3))
+        elif stripped.startswith("## "):
+            story.append(Paragraph(stripped[3:], style_h2))
+        elif stripped.startswith("# "):
+            story.append(Paragraph(stripped[2:], style_h1))
+        elif stripped == "---":
+            story.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey, spaceAfter=4))
+        elif stripped.startswith("| "):
+            # 구분선 행(| --- |) 스킵
+            if re.match(r"^\|[\s\-|]+\|$", stripped):
+                continue
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            text = "  |  ".join(
+                re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", c) for c in cells
+            )
+            story.append(Paragraph(text, style_body))
+        elif stripped.startswith("- ") or stripped.startswith("* "):
+            text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", stripped[2:])
+            story.append(Paragraph(f"• {text}", style_li))
+        elif stripped == "":
+            story.append(Spacer(1, 4))
+        else:
+            text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", stripped)
+            story.append(Paragraph(text, style_body))
+
+    doc.build(story)
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +349,12 @@ def report_generation_agent(state) -> dict:
         "comparison_report": state.get("comparison_report", ""),
         "sections":          None,
         "final_report":      "",
+        "report_md_path":    "",
+        "report_pdf_path":   "",
     })
 
-    return {"final_report": result["final_report"]}
+    return {
+        "final_report":    result["final_report"],
+        "report_md_path":  result["report_md_path"],
+        "report_pdf_path": result["report_pdf_path"],
+    }

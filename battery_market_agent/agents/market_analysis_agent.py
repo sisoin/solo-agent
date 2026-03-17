@@ -16,8 +16,12 @@
 
 출력:
     state["market_trends"][company]: 시장 동향 분석 결과 문자열
+    state["market_sources"][company]: 사용된 출처 목록 [{"title", "url", "tool"}, ...]
 """
-from langchain_anthropic import ChatAnthropic
+import re
+
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import create_react_agent
 
 from battery_market_agent.config.settings import Settings
@@ -29,9 +33,9 @@ from battery_market_agent.tools import search_web, fetch_google_news, fetch_pric
 # ---------------------------------------------------------------------------
 
 _settings = Settings()
-_llm = ChatAnthropic(
+_llm = ChatOpenAI(
     model=_settings.model_name,
-    api_key=_settings.anthropic_api_key,
+    api_key=_settings.openai_api_key,
 )
 
 MARKET_TOOLS = [search_web, fetch_google_news, fetch_price_trends]
@@ -46,9 +50,13 @@ SYSTEM_PROMPT = """당신은 배터리 산업 전문 시장 분석가입니다.
 4. 배터리 원자재 가격 동향 (리튬, 코발트, 니켈)
 5. 최신 뉴스 및 산업 이슈
 
-지침:
+균형 잡힌 정보 수집 지침:
+- 긍정적 정보(수주·성장·기술 성과)를 검색한 뒤, 반드시 부정적 정보도 별도로 검색하세요.
+  예) "{기업} 수주 성장" 검색 → "{기업} 실적 부진 적자 리스크" 추가 검색
+- 각 조사 항목마다 낙관적 전망과 비관적 전망을 모두 포함하세요.
+- 부정적 측면 예시: 실적 악화, 고객 이탈, 공급망 차질, 가동률 하락, 경쟁사 위협, 소송·리콜, 수익성 압박
+- 애널리스트 경고, 신용등급 변화, 규제 리스크도 수집하세요.
 - search_web과 fetch_google_news 툴을 적극적으로 활용하세요.
-- 각 항목마다 출처가 되는 검색을 수행한 뒤 결과를 종합하세요.
 - 최종 답변은 항목별로 구조화된 한국어 분석 보고서 형식으로 작성하세요.
 """
 
@@ -60,6 +68,57 @@ _agent = create_react_agent(
     prompt=SYSTEM_PROMPT,
     name="market_analysis_agent",
 )
+
+# ---------------------------------------------------------------------------
+# 출처 추출
+# ---------------------------------------------------------------------------
+
+_URL_RE = re.compile(r"https?://[^\s'\"\)\]>,<]+")
+_SOURCE_LINE_RE = re.compile(r"^출처:\s*(.+)$", re.MULTILINE)
+
+
+def _extract_sources(messages: list, tool_name: str) -> list[dict[str, str]]:
+    """ToolMessage 내용에서 출처 URL을 파싱한다.
+
+    '출처: <url>' 패턴을 우선 추출하고, 그 외 URL도 수집한다.
+    URL이 없거나 http(s)로 시작하지 않는 항목은 제외한다.
+    """
+    seen: set[str] = set()
+    sources: list[dict[str, str]] = []
+
+    for msg in messages:
+        if not isinstance(msg, ToolMessage):
+            continue
+        if msg.name and msg.name != tool_name:
+            continue
+
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+
+        # '출처: <url>' 패턴 우선 수집 (title은 바로 앞 줄에서 추출)
+        lines = content.splitlines()
+        for idx, line in enumerate(lines):
+            m = _SOURCE_LINE_RE.match(line.strip())
+            if m:
+                url = m.group(1).strip()
+                if url.startswith("http") and url not in seen:
+                    # 앞 줄에서 제목 추출: "[N] 제목 (날짜)" 형식
+                    title = ""
+                    if idx > 0:
+                        prev = lines[idx - 1].strip()
+                        title_m = re.match(r"^\[\d+\]\s*(.+?)(?:\s*\(.+\))?$", prev)
+                        if title_m:
+                            title = title_m.group(1).strip()
+                    seen.add(url)
+                    sources.append({"title": title, "url": url, "tool": tool_name})
+
+        # 위에서 못 잡은 나머지 URL도 수집
+        for url in _URL_RE.findall(content):
+            if url not in seen:
+                seen.add(url)
+                sources.append({"title": "", "url": url, "tool": tool_name})
+
+    return sources
+
 
 # ---------------------------------------------------------------------------
 # 노드
@@ -80,7 +139,17 @@ def market_analysis_agent(state: BatteryMarketState) -> dict:
         ]
     })
 
-    market_trends = state.get("market_trends", {})
-    market_trends[company] = result["messages"][-1].content
+    messages = result["messages"]
 
-    return {"market_trends": market_trends}
+    # 출처 수집: search_web, fetch_google_news 각각 파싱
+    sources: list[dict[str, str]] = []
+    for tool_name in ("search_web", "fetch_google_news"):
+        sources.extend(_extract_sources(messages, tool_name))
+
+    market_trends = state.get("market_trends", {})
+    market_trends[company] = messages[-1].content
+
+    market_sources = state.get("market_sources", {})
+    market_sources[company] = sources
+
+    return {"market_trends": market_trends, "market_sources": market_sources}

@@ -7,7 +7,7 @@ SWOT 서브그래프 노드 모음.
     format_matrix_node → analyze_swot 툴로 2×2 행렬 렌더링
 """
 from pydantic import BaseModel, Field
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 
 from battery_market_agent.config.settings import Settings
 from battery_market_agent.tools.search_tools import fetch_google_news, search_web
@@ -15,9 +15,9 @@ from battery_market_agent.tools.analysis_tools import analyze_swot
 from .state import SWOTState
 
 _settings = Settings()
-_llm = ChatAnthropic(
+_llm = ChatOpenAI(
     model=_settings.model_name,
-    api_key=_settings.anthropic_api_key,
+    api_key=_settings.openai_api_key,
 )
 
 
@@ -44,15 +44,18 @@ def gather_info_node(state: SWOTState) -> dict:
     """
     분석 대상에 대한 최신 뉴스와 웹 검색 결과를 수집합니다.
 
-    - fetch_google_news : 최신 뉴스 기사 (외부 환경 파악 → O/T)
-    - search_web        : 시장 동향, 경쟁사 분석, 전략 정보 (S/W/O/T 전반)
+    낙관·비관 양면을 균형 있게 수집하기 위해 긍정/부정 쿼리를 각각 실행합니다.
+    - fetch_google_news  : 최신 뉴스 기사 (외부 환경 → O/T)
+    - search_web (긍정)  : 성장·강점·기술 성과 정보 (S/O)
+    - search_web (부정)  : 리스크·약점·위협 정보 (W/T)
     """
     subject = state["subject"]
 
-    news = fetch_google_news.invoke({"query": subject, "period": "1m", "max_results": 10})
-    web  = search_web.invoke({"query": f"{subject} 강점 약점 시장 분석", "max_results": 5})
+    news         = fetch_google_news.invoke({"query": subject, "period": "1m", "max_results": 10})
+    web_positive = search_web.invoke({"query": f"{subject} 강점 기술력 성장 시장점유율", "max_results": 5})
+    web_negative = search_web.invoke({"query": f"{subject} 리스크 약점 위기 실적부진 경쟁 위협", "max_results": 5})
 
-    return {"raw_info": [news, web]}
+    return {"raw_info": [news, web_positive, web_negative]}
 
 
 def classify_swot_node(state: SWOTState) -> dict:
@@ -78,7 +81,11 @@ def classify_swot_node(state: SWOTState) -> dict:
 - Opportunities (기회): 외부 환경에서 유리하게 작용하는 요소. {o_crit}
 - Threats (위협)      : 외부 환경에서의 위험 요소. {t_crit}
 
-각 항목은 구체적이고 간결하게 작성하세요."""
+균형 지침:
+- Strengths와 Opportunities 항목만 나열하지 마세요.
+- Weaknesses와 Threats는 Strengths·Opportunities와 비슷한 수량으로 도출하세요.
+- 수집된 부정적 정보(리스크, 실적 악화, 경쟁 위협)를 Weaknesses·Threats에 반드시 반영하세요.
+- 각 항목은 구체적이고 간결하게 작성하세요."""
 
     result: SWOTItems = _structured_llm.invoke(prompt)
 

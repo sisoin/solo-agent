@@ -34,15 +34,43 @@ class ReportSections(BaseModel):
     )
 
     # 1. 시장 배경
-    market_overview: str       = Field(description="1.1 글로벌 배터리 시장 현황 및 규모 (수치 포함)")
-    market_trends: str         = Field(description="1.2 시장 구조 변화 및 핵심 트렌드")
-    competitive_landscape: str = Field(description="1.3 경쟁 구도 개요 (글로벌 Top 점유율 및 CATL·LGES 포지션)")
+    market_overview: str       = Field(description=(
+        "1.1 글로벌 배터리 시장 현황 및 규모. 400자 이상. "
+        "시장 규모(달러 기준), 연평균 성장률(CAGR), 주요 성장 드라이버(EV 수요·ESS·정책)를 "
+        "구체적 수치와 함께 3문단 이상 서술."
+    ))
+    market_trends: str         = Field(description=(
+        "1.2 시장 구조 변화 및 핵심 트렌드. 400자 이상. "
+        "LFP vs NCM 점유율 변화, 전고체 배터리 동향, ESS 수요 확대, 원자재 가격 변동 등 "
+        "3개 이상 트렌드를 각각 구체적으로 서술."
+    ))
+    competitive_landscape: str = Field(description=(
+        "1.3 경쟁 구도 개요. 400자 이상. "
+        "글로벌 Top 5 배터리 제조사 시장 점유율(수치 포함), "
+        "CATL·LGES의 지역별 포지션 및 경쟁 구도를 3문단 이상 서술."
+    ))
 
     # 2. 기업별 포트폴리오
-    lg_portfolio: str   = Field(description="2.1.1 LG에너지솔루션 사업 포트폴리오 구성")
-    lg_tech: str        = Field(description="2.1.2 LG에너지솔루션 기술 경쟁력")
-    catl_portfolio: str = Field(description="2.2.1 CATL 사업 포트폴리오 구성")
-    catl_tech: str      = Field(description="2.2.2 CATL 기술 경쟁력")
+    lg_portfolio: str   = Field(description=(
+        "2.1.1 LG에너지솔루션 사업 포트폴리오 구성. 400자 이상. "
+        "파우치·원통형·각형 폼팩터 비중, EV·ESS·소형전지 매출 구조, "
+        "주요 고객사(OEM) 및 JV 현황을 3문단 이상 서술."
+    ))
+    lg_tech: str        = Field(description=(
+        "2.1.2 LG에너지솔루션 기술 경쟁력. 400자 이상. "
+        "NCM·NCMA 양극재 기술, 건식전극 공정, 전고체 배터리 개발 로드맵, "
+        "BMS 및 셀 설계 특허 강점을 3문단 이상 서술."
+    ))
+    catl_portfolio: str = Field(description=(
+        "2.2.1 CATL 사업 포트폴리오 구성. 400자 이상. "
+        "LFP·NCM·나트륨이온 배터리 라인업, 각형 셀 주력 폼팩터, "
+        "글로벌 주요 OEM 고객사 및 해외 공장 현황을 3문단 이상 서술."
+    ))
+    catl_tech: str      = Field(description=(
+        "2.2.2 CATL 기술 경쟁력. 400자 이상. "
+        "셀투팩(CTP) 기술, 기린 배터리(Kirin), 나트륨이온·불소리튬(NFPP) 차세대 배터리, "
+        "생산 자동화 및 원가 절감 공정 혁신을 3문단 이상 서술."
+    ))
 
     # 3. 전략 비교
     strategy_tech: StrategyRow      = Field(description="기술 방향성 비교 (배터리 화학·폼팩터·차세대 기술)")
@@ -58,9 +86,21 @@ class ReportSections(BaseModel):
     swot_ot_implications: str = Field(description="외부 환경(O/T) 관점 양사 비교 시사점")
 
     # 4. 종합 시사점
-    positioning_diff: str   = Field(description="4.1 두 기업의 전략적 포지셔닝 차이")
-    market_outlook: str     = Field(description="4.2 배터리 시장 향후 전망과 시사점")
-    investment_opinion: str = Field(description="4.3 투자·협력 관점 종합 의견")
+    positioning_diff: str   = Field(description=(
+        "4.1 두 기업의 전략적 포지셔닝 차이. 350자 이상. "
+        "지역(중국·북미·유럽), 배터리 화학(LFP vs NCM), 고객 전략 3개 축에서 "
+        "구체적 수치·사례와 함께 비교 서술."
+    ))
+    market_outlook: str     = Field(description=(
+        "4.2 배터리 시장 향후 전망과 시사점. 350자 이상. "
+        "2025~2030년 시장 성장 전망, 양사의 기회 요인과 리스크 요인을 "
+        "균형 있게 2문단 이상 서술."
+    ))
+    investment_opinion: str = Field(description=(
+        "4.3 투자·협력 관점 종합 의견. 350자 이상. "
+        "양사의 투자 매력도, 주요 리스크, 협력 가능 영역을 "
+        "투자자·파트너 관점에서 2문단 이상 구체적으로 서술."
+    ))
 
     # REFERENCE — 보고서 맨 마지막
     references: list[str] = Field(

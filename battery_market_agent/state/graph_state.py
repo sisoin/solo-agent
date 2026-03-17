@@ -49,10 +49,7 @@ class BatteryMarketState(TypedDict):
 
     # ── report_generation 단계 ────────────────────────────────────────────
     final_report: str
-    """report_generation_agent가 렌더링한 최종 마크다운 보고서."""
-
-    report_md_path: str
-    """저장된 마크다운 보고서 파일 경로."""
+    """report_generation_agent가 생성한 보고서 SUMMARY 텍스트."""
 
     report_pdf_path: str
     """저장된 PDF 보고서 파일 경로."""

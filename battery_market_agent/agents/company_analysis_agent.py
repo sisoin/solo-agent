@@ -27,7 +27,12 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langgraph_supervisor import create_supervisor
 
+import re
+
 from battery_market_agent.config import Settings
+from battery_market_agent.rag import BatteryRAG
+
+_URL_RE = re.compile(r"https?://[^\s'\"\)\]>,<]+")
 from battery_market_agent.tools import (
     search_web,
     fetch_google_news,
@@ -142,38 +147,85 @@ company_supervisor = create_supervisor(
 # 메인 그래프 노드 래퍼
 # ---------------------------------------------------------------------------
 
-_RAG_MAX_DOCS = 6        # 전달할 최대 문서 수
-_RAG_MAX_CHARS = 400    # 문서당 최대 문자 수
+_RAG_COMMON_MAX_DOCS = 8   # 공통 문서 최대 수
+_RAG_COMPANY_MAX_DOCS = 5  # 회사별 문서 최대 수
+_RAG_MAX_CHARS = 1000      # 문서당 최대 문자 수
+
+_COMPANY_RAG_QUERIES = {
+    "LG에너지솔루션": [
+        "LG에너지솔루션 배터리 기술 전략 NCM NCMA",
+        "LG에너지솔루션 시장 점유율 북미 유럽",
+    ],
+    "CATL": [
+        "CATL 배터리 기술 전략 LFP 각형",
+        "CATL 시장 점유율 중국 글로벌",
+    ],
+}
 
 
-def _format_rag_context(retrieved_docs) -> str:
-    """retrieved_docs를 supervisor에 전달할 컨텍스트 문자열로 포맷한다.
-
-    TPM 한도 초과 방지를 위해 상위 _RAG_MAX_DOCS개 문서만,
-    각 문서는 _RAG_MAX_CHARS자로 잘라 전달한다.
-    """
-    if not retrieved_docs:
-        print("[_format_rag_context] retrieved_docs 없음 — RAG 컨텍스트 미사용")
-        return ""
-    total = len(retrieved_docs)
-    used = retrieved_docs[:_RAG_MAX_DOCS]
-    print(f"[_format_rag_context] 전체 {total}개 중 {len(used)}개 사용 (문서당 최대 {_RAG_MAX_CHARS}자)")
-    lines = ["[RAG 컨텍스트 — 사전 수집된 배터리 산업 배경 지식]"]
-    for i, doc in enumerate(used, 1):
+def _format_section(title: str, docs: list, max_docs: int, offset: int = 0) -> tuple[list[str], int]:
+    """문서 섹션을 포맷하고 (lines, 사용된_문서_수)를 반환한다."""
+    used = docs[:max_docs]
+    lines = [f"\n[{title}]"]
+    for i, doc in enumerate(used, offset + 1):
         source = doc.metadata.get("source", "")
         page = doc.metadata.get("page", "")
         ref = f" ({source}, p.{page})" if source else ""
         content = doc.page_content.strip()[:_RAG_MAX_CHARS]
         print(f"  [문서 {i}{ref}] {len(content)}자 전달")
         lines.append(f"\n[문서 {i}{ref}]\n{content}")
+    return lines, len(used)
+
+
+def _format_rag_context(common_docs: list, company_docs: list) -> str:
+    """공통 문서와 회사별 문서를 섹션 구분하여 supervisor 전달용 문자열로 포맷한다."""
+    if not common_docs and not company_docs:
+        print("[_format_rag_context] retrieved_docs 없음 — RAG 컨텍스트 미사용")
+        return ""
+
+    print(f"[_format_rag_context] 공통 {len(common_docs)}개 중 최대 {_RAG_COMMON_MAX_DOCS}개, "
+          f"회사별 {len(company_docs)}개 중 최대 {_RAG_COMPANY_MAX_DOCS}개 사용 "
+          f"(문서당 최대 {_RAG_MAX_CHARS}자)")
+
+    lines = ["[RAG 컨텍스트 — 사전 수집된 배터리 산업 배경 지식]"]
+
+    section_lines, used_common = _format_section(
+        "공통 — 배터리 시장 배경", common_docs, _RAG_COMMON_MAX_DOCS, offset=0
+    )
+    lines.extend(section_lines)
+
+    if company_docs:
+        section_lines, _ = _format_section(
+            "회사별 — 기술·전략 문서", company_docs, _RAG_COMPANY_MAX_DOCS, offset=used_common
+        )
+        lines.extend(section_lines)
+
     return "\n".join(lines)
+
+
+def _retrieve_company_docs(company: str) -> list:
+    """회사별 특화 쿼리로 RAG를 검색하고 중복 제거된 문서 목록을 반환한다."""
+    rag = BatteryRAG.get_instance(Settings())
+    queries = _COMPANY_RAG_QUERIES.get(company, [f"{company} 배터리 기술 전략"])
+
+    seen: set[str] = set()
+    docs = []
+    for query in queries:
+        for doc in rag.retrieve(query, company=company):
+            key = f"{doc.metadata.get('source', '')}_{doc.metadata.get('page', '')}"
+            if key not in seen:
+                seen.add(key)
+                docs.append(doc)
+
+    print(f"[company_analysis_agent] {company} 회사별 RAG 검색: {len(docs)}개 문서")
+    return docs
 
 
 def company_analysis_agent(state) -> dict:
     """
     기업 분석 Supervisor 노드.
 
-    retrieved_docs(RAG)를 요약 컨텍스트로 포함한 초기 메시지를 supervisor에 전달하고,
+    공통 retrieved_docs + 회사별 특화 RAG 검색 결과를 합쳐 supervisor에 전달하고,
     최종 메시지를 state["company_report"][company]에 저장한다.
     Rate Limit 에러 시 최대 3회 재시도(지수 백오프)한다.
     """
@@ -181,7 +233,9 @@ def company_analysis_agent(state) -> dict:
     from openai import RateLimitError
 
     company = state["company"]
-    rag_context = _format_rag_context(state.get("retrieved_docs", []))
+    common_docs = state.get("retrieved_docs", [])
+    company_docs = _retrieve_company_docs(company)
+    rag_context = _format_rag_context(common_docs, company_docs)
 
     user_message = (
         f"{company}의 시장 동향, 기술 역량, SWOT 분석을 수행해주세요.\n\n"
@@ -206,4 +260,17 @@ def company_analysis_agent(state) -> dict:
     company_report = state.get("company_report", {})
     company_report[company] = result["messages"][-1].content
 
-    return {"company_report": company_report}
+    # supervisor 내부 메시지 전체에서 URL 수집 (market_analysis_agent 등의 ToolMessage 포함)
+    seen: set[str] = set()
+    sources: list[dict[str, str]] = []
+    for msg in result["messages"]:
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        for url in _URL_RE.findall(content):
+            if url not in seen:
+                seen.add(url)
+                sources.append({"url": url, "title": "", "tool": getattr(msg, "name", "")})
+
+    market_sources = state.get("market_sources", {})
+    market_sources[company] = sources
+
+    return {"company_report": company_report, "market_sources": market_sources}

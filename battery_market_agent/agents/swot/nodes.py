@@ -62,15 +62,21 @@ def classify_swot_node(state: SWOTState) -> dict:
     subject  = state["subject"]
     raw_text = "\n\n---\n\n".join(state["raw_info"])
 
+    criteria = state.get("criteria", {})
+    s_crit = criteria.get("strength", "")
+    w_crit = criteria.get("weakness", "")
+    o_crit = criteria.get("opportunity", "")
+    t_crit = criteria.get("threat", "")
+
     prompt = f"""다음은 '{subject}'에 관해 수집된 정보입니다.
 
 {raw_text}
 
 위 정보를 바탕으로 '{subject}'의 SWOT 분석을 수행하세요.
-- Strengths (강점)    : 내부적으로 잘하고 있는 것, 경쟁 우위 요소
-- Weaknesses (약점)   : 내부적으로 부족한 점, 개선이 필요한 부분
-- Opportunities (기회): 외부 환경에서 유리하게 작용하는 요소
-- Threats (위협)      : 외부 환경에서의 위험 요소
+- Strengths (강점)    : 내부적으로 잘하고 있는 것, 경쟁 우위 요소. {s_crit}
+- Weaknesses (약점)   : 내부적으로 부족한 점, 개선이 필요한 부분. {w_crit}
+- Opportunities (기회): 외부 환경에서 유리하게 작용하는 요소. {o_crit}
+- Threats (위협)      : 외부 환경에서의 위험 요소. {t_crit}
 
 각 항목은 구체적이고 간결하게 작성하세요."""
 

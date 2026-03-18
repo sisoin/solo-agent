@@ -19,6 +19,11 @@ def _merge_dicts(left: dict, right: dict) -> dict:
     return {**left, **right}
 
 
+def _merge_lists(left: list, right: list) -> list:
+    """두 list를 이어붙인다."""
+    return left + right
+
+
 class BatteryMarketState(TypedDict):
     # ── retrieve 단계 ─────────────────────────────────────────────────────
     retrieved_docs: list[Document]
@@ -39,9 +44,10 @@ class BatteryMarketState(TypedDict):
     """기업별 웹 검색 출처 목록.
     {"LG에너지솔루션": [{"title", "url", "tool"}, ...], "CATL": [...]}"""
 
-    rag_sources: list[dict]
-    """retrieve_node가 수집한 RAG 문서 출처 목록.
+    rag_sources: Annotated[list[dict], _merge_lists]
+    """RAG 문서 출처 목록 (retrieve_node 공통 + company_analysis 회사별).
     [{"source": "<path|url>", "company": "<회사명|None>", "filename": "<파일명>"}, ...]
+    두 병렬 브랜치가 각각 회사별 출처를 반환하며 _merge_lists로 합산된다.
     보고서 참고문헌에 반드시 포함된다."""
 
     # ── company_comparison 단계 ───────────────────────────────────────────

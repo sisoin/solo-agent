@@ -1,10 +1,13 @@
 """
-보고서 생성 에이전트
+보고서 생성 노드 (순차 파이프라인)
+
+메인 그래프에서는 단일 노드로 호출되며, 내부적으로 4단계를 순차 실행한다.
 
 처리 흐름:
-    1. generate_sections_node : LLM.with_structured_output → ReportSections
-    2. render_html_node       : ReportSections → HTML 문자열 (인라인 CSS 포함)
-    3. convert_pdf_node       : weasyprint HTML → PDF 저장
+    1. generate_sections_node  : LLM.with_structured_output → ReportSections
+    2. validate_references_node: 참고문헌 URL 유효성 검사 및 중복 제거
+    3. render_html_node        : ReportSections → HTML 문자열 (인라인 CSS 포함)
+    4. convert_pdf_node        : weasyprint HTML → PDF 저장
 """
 import re
 from datetime import datetime
@@ -89,7 +92,7 @@ def generate_sections_node(state: ReportState) -> dict:
         rag_source_lines.append(f"- {label}{display}")
 
     rag_block = (
-        "\n\n[RAG 문서 출처 — 반드시 REFERENCE에 모두 포함할 것]\n"
+        "\n\n※ 아래 RAG 문서를 REFERENCE 섹션에 빠짐없이 포함하세요:\n"
         + "\n".join(rag_source_lines)
         if rag_source_lines else ""
     )
@@ -107,7 +110,7 @@ def generate_sections_node(state: ReportState) -> dict:
                 source_lines.append(f"- [{company}] {title} | {url}" if title else f"- [{company}] {url}")
 
     web_block = (
-        "\n\n[웹 검색 출처 목록 — URL이 있는 자료만 REFERENCE에 포함]\n"
+        "\n\n※ 아래 웹 검색 출처 중 URL이 있는 자료만 REFERENCE 섹션에 포함하세요:\n"
         + "\n".join(source_lines)
         if source_lines else ""
     )
@@ -438,7 +441,7 @@ def convert_pdf_node(state: ReportState) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 서브그래프
+# 내부 순차 파이프라인 (generate_sections → validate → render → pdf)
 # ---------------------------------------------------------------------------
 
 def build_report_graph():

@@ -1,33 +1,41 @@
 """
 기업 분석 Supervisor (langgraph_supervisor.create_supervisor 기반)
 
-Supervisor LLM이 세 하위 에이전트를 순차적으로 조율하며
+Supervisor LLM이 market_tech_agent(병렬 서브그래프)와 swot_analysis_agent를 조율하며
 각 에이전트가 완료되면 결과를 다시 Supervisor에게 반환(핸드오프)한다.
 
 LG에너지솔루션 / CATL은 상위 그래프의 Send API로 병렬 처리되고
 각 회사 내 에이전트 조율은 Supervisor LLM이 담당한다.
 
 실행 흐름:
+    [라운드 1 — 초기 수집]
     supervisor (LLM)
-        ↓ transfer_to_market_analysis_agent
-    market_analysis_agent  →  결과 반환
-        ↓ transfer_back_to_supervisor
-    supervisor (LLM)
-        ↓ transfer_to_tech_analysis_agent
-    tech_analysis_agent    →  결과 반환
+        ↓ transfer_to_market_tech_agent
+    market_tech_agent (서브그래프)
+        ├─ market_analysis_agent  ─┐ 병렬 실행
+        └─ tech_analysis_agent    ─┘
+        →  시장+기술 분석 결과 반환
         ↓ transfer_back_to_supervisor
     supervisor (LLM)
         ↓ transfer_to_swot_analysis_agent
-    swot_analysis_agent    →  결과 반환
+    swot_analysis_agent  →  SWOT 결과 반환
         ↓ transfer_back_to_supervisor
-    supervisor (LLM) — 세 결과 종합 후 종료
+
+    [라운드 2~3 — 결과 검증 및 보완 (필요 시)]
+    supervisor (LLM) — 체크리스트로 누락 항목 확인
+        ↓ 부족한 에이전트 재호출 (누락 항목 명시)
+    agent  →  보완 결과 반환
+        ↓ transfer_back_to_supervisor
+    supervisor (LLM) — 최대 3라운드 후 종합 보고서 작성
 """
+import asyncio
+import re
+
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
+from langgraph.graph import StateGraph, END, MessagesState
 from langgraph.prebuilt import create_react_agent
 from langgraph_supervisor import create_supervisor
-
-import re
 
 from battery_market_agent.config import Settings, analysis_rate_limiter
 from battery_market_agent.rag import BatteryRAG
@@ -75,8 +83,7 @@ async def run_swot_analysis(company: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 하위 에이전트 (create_react_agent + name)
-# name은 create_supervisor가 transfer_to_{name} 핸드오프 도구를 자동 생성할 때 사용
+# 하위 에이전트
 # ---------------------------------------------------------------------------
 
 # 시장 분석: market_analysis_agent.py에서 컴파일된 그래프를 재사용
@@ -102,6 +109,37 @@ _tech_agent = create_react_agent(
     ),
 )
 
+# ---------------------------------------------------------------------------
+# market + tech 병렬 서브그래프
+# Supervisor가 단일 에이전트로 핸드오프하면 내부에서 market/tech를 동시에 실행한다.
+# ---------------------------------------------------------------------------
+
+async def _parallel_market_tech(state: MessagesState) -> dict:
+    """market_analysis_agent와 tech_analysis_agent를 병렬 실행하고 결과를 합친다."""
+    messages = state["messages"]
+
+    market_task = _market_agent.ainvoke({"messages": messages})
+    tech_task = _tech_agent.ainvoke({"messages": messages})
+
+    market_result, tech_result = await asyncio.gather(market_task, tech_task)
+
+    market_content = market_result["messages"][-1].content
+    tech_content = tech_result["messages"][-1].content
+
+    combined = (
+        f"[시장 분석 결과]\n{market_content}\n\n"
+        f"[기술 분석 결과]\n{tech_content}"
+    )
+    print(f"[market_tech_agent] 병렬 실행 완료 — 시장({len(market_content)}자) + 기술({len(tech_content)}자)")
+    return {"messages": [{"role": "assistant", "content": combined}]}
+
+
+_market_tech_graph = StateGraph(MessagesState)
+_market_tech_graph.add_node("parallel_analysis", _parallel_market_tech)
+_market_tech_graph.set_entry_point("parallel_analysis")
+_market_tech_graph.add_edge("parallel_analysis", END)
+_market_tech_agent = _market_tech_graph.compile(name="market_tech_agent")
+
 # SWOT 분석
 _swot_agent = create_react_agent(
     model=_llm,
@@ -121,15 +159,26 @@ _swot_agent = create_react_agent(
 _SUPERVISOR_PROMPT = (
     "당신은 단일 기업의 종합 분석을 조율하는 Supervisor입니다.\n\n"
     "담당 에이전트:\n"
-    "1. market_analysis_agent : 시장 동향 수집 (규모, 성장률, 수요, 원자재 가격)\n"
-    "2. tech_analysis_agent   : 기술 역량 분석 (셀 기술, 양극재, BMS, 생산 공정)\n"
-    "3. swot_analysis_agent   : SWOT 분석 수행 및 2×2 행렬 생성\n\n"
+    "1. market_tech_agent   : 시장 동향 + 기술 역량을 병렬로 분석 (내부에서 market/tech 동시 실행)\n"
+    "2. swot_analysis_agent : SWOT 분석 수행 및 2×2 행렬 생성\n\n"
+    "실행 순서:\n"
+    "- 먼저 market_tech_agent를 호출하여 시장·기술 분석을 동시에 수행하세요.\n"
+    "- market_tech_agent 결과를 받은 뒤 swot_analysis_agent를 호출하세요.\n"
+    "  (SWOT은 시장·기술 분석 결과를 바탕으로 판단하므로 반드시 후순위입니다.)\n\n"
     "지침:\n"
     "- 메시지에 포함된 [RAG 컨텍스트]는 사전 수집된 배터리 산업 배경 지식입니다.\n"
     "  각 에이전트에게 이 컨텍스트를 참고 자료로 전달하고, 웹서치로 최신 정보를 보완하도록 안내하세요.\n"
     "- RAG 컨텍스트만으로 충분한 항목은 웹서치를 생략해도 되지만,\n"
-    "  최신성이 필요한 항목(시장 규모, 원자재 가격, 뉴스)은 반드시 웹서치로 보완하세요.\n"
-    "- 세 에이전트를 순서대로 호출하여 각 분석을 완료하세요.\n"
+    "  최신성이 필요한 항목(시장 규모, 원자재 가격, 뉴스)은 반드시 웹서치로 보완하세요.\n\n"
+    "결과 검증 및 보완 (최대 3라운드):\n"
+    "- 두 에이전트를 모두 호출한 뒤, 수집된 결과를 아래 체크리스트로 검증하세요:\n"
+    "  · 시장 분석: 시장 규모(금액), 성장률(%), 주요 수요처, 원자재 가격 동향이 포함되었는가?\n"
+    "  · 기술 분석: 핵심 셀 기술, 양극재 전략, 차세대 배터리 동향이 포함되었는가?\n"
+    "  · SWOT: S/W/O/T 각 항목이 2개 이상 구체적으로 서술되었는가?\n"
+    "- 누락된 항목이 있으면 해당 에이전트를 다시 호출하여 부족한 정보만 보완 요청하세요.\n"
+    "  재호출 시 이전 결과를 함께 전달하고, 누락된 항목을 명시적으로 지정하세요.\n"
+    "- 전체 라운드(초기 호출 + 보완 호출)는 최대 3회까지만 허용됩니다.\n"
+    "  3라운드 안에 충분한 정보를 확보하지 못해도 수집된 결과로 보고서를 작성하세요.\n\n"
     "- 모든 에이전트 결과를 수집한 뒤 종합 기업 보고서를 작성하세요.\n"
     "- 보고서 형식은 미정이므로 수집 정보를 구조화하여 전달하세요.\n\n"
     "균형 분석 원칙 (필수):\n"
@@ -141,7 +190,7 @@ _SUPERVISOR_PROMPT = (
 
 company_supervisor = create_supervisor(
     model=_llm,
-    agents=[_market_agent, _tech_agent, _swot_agent],
+    agents=[_market_tech_agent, _swot_agent],
     system_prompt=_SUPERVISOR_PROMPT,
     add_handoff_back_messages=True,   # 에이전트 → Supervisor 복귀 메시지 추가
     output_mode="last_message",       # 최종 Supervisor 메시지만 반환
@@ -290,4 +339,21 @@ async def company_analysis_agent(state) -> dict:
     market_sources = state.get("market_sources", {})
     market_sources[company] = sources
 
-    return {"company_report": company_report, "market_sources": market_sources}
+    # 회사별 RAG 문서 출처를 rag_sources에 추가 (source 기준 중복 제거)
+    existing_sources = {s.get("source", "") for s in state.get("rag_sources", [])}
+    new_rag_sources: list[dict] = []
+    for doc in company_docs:
+        source = doc.metadata.get("source", "")
+        if source and source not in existing_sources:
+            existing_sources.add(source)
+            new_rag_sources.append({
+                "source":   source,
+                "company":  doc.metadata.get("company", ""),
+                "filename": doc.metadata.get("filename", ""),
+            })
+
+    return {
+        "company_report": company_report,
+        "market_sources": market_sources,
+        "rag_sources": new_rag_sources,
+    }

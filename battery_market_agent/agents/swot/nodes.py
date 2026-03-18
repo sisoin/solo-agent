@@ -9,7 +9,7 @@ SWOT 서브그래프 노드 모음.
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 
-from battery_market_agent.config.settings import Settings
+from battery_market_agent.config.settings import Settings, shared_rate_limiter
 from battery_market_agent.tools.search_tools import fetch_google_news, search_web
 from battery_market_agent.tools.analysis_tools import analyze_swot
 from .state import SWOTState
@@ -18,6 +18,8 @@ _settings = Settings()
 _llm = ChatOpenAI(
     model=_settings.model_name,
     api_key=_settings.openai_api_key,
+    rate_limiter=shared_rate_limiter,
+    max_retries=6,
 )
 
 

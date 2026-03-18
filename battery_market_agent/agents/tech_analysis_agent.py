@@ -24,7 +24,7 @@ RAG 구조:
 from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
 
-from battery_market_agent.config import Settings
+from battery_market_agent.config import Settings, shared_rate_limiter
 from battery_market_agent.rag import BatteryRAG
 from battery_market_agent.state import TechAnalysisState
 
@@ -36,6 +36,8 @@ _settings = Settings()
 _llm = ChatOpenAI(
     model=_settings.model_name,
     api_key=_settings.openai_api_key,
+    rate_limiter=shared_rate_limiter,
+    max_retries=6,
 )
 
 # ---------------------------------------------------------------------------

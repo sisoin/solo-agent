@@ -21,7 +21,7 @@
 """
 from langchain_openai import ChatOpenAI
 
-from battery_market_agent.config import Settings
+from battery_market_agent.config import Settings, shared_rate_limiter
 from battery_market_agent.state import BatteryMarketState
 
 # ---------------------------------------------------------------------------
@@ -72,6 +72,8 @@ _settings = Settings()
 _llm = ChatOpenAI(
     model=_settings.model_name,
     api_key=_settings.openai_api_key,
+    rate_limiter=shared_rate_limiter,
+    max_retries=6,
 )
 
 _COMPARISON_PROMPT = """\

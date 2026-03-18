@@ -15,7 +15,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 import weasyprint
 
-from battery_market_agent.config import Settings, shared_rate_limiter
+from battery_market_agent.config import Settings, analysis_rate_limiter
 from battery_market_agent.state.report_state import ReportState, ReportSections
 
 # ---------------------------------------------------------------------------
@@ -23,9 +23,9 @@ from battery_market_agent.state.report_state import ReportState, ReportSections
 # ---------------------------------------------------------------------------
 _settings = Settings()
 _llm = ChatOpenAI(
-    model=_settings.model_name,
+    model=_settings.analysis_model_name,
     api_key=_settings.openai_api_key,
-    rate_limiter=shared_rate_limiter,
+    rate_limiter=analysis_rate_limiter,
     max_retries=6,
 )
 _structured_llm = _llm.with_structured_output(ReportSections)

@@ -43,6 +43,11 @@ class BatteryMarketState(TypedDict):
     """기업별 웹 검색 출처 목록.
     {"LG에너지솔루션": [{"title", "url", "tool"}, ...], "CATL": [...]}"""
 
+    rag_sources: list[dict]
+    """retrieve_node가 수집한 RAG 문서 출처 목록.
+    [{"source": "<path|url>", "company": "<회사명|None>", "filename": "<파일명>"}, ...]
+    보고서 참고문헌에 반드시 포함된다."""
+
     # ── company_comparison 단계 ───────────────────────────────────────────
     comparison_report: str
     """company_comparison_agent가 생성한 두 기업 비교 분석 텍스트."""

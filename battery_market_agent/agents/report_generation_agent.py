@@ -15,14 +15,19 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 import weasyprint
 
-from battery_market_agent.config import Settings
+from battery_market_agent.config import Settings, shared_rate_limiter
 from battery_market_agent.state.report_state import ReportState, ReportSections
 
 # ---------------------------------------------------------------------------
 # LLM
 # ---------------------------------------------------------------------------
 _settings = Settings()
-_llm = ChatOpenAI(model=_settings.model_name, api_key=_settings.openai_api_key)
+_llm = ChatOpenAI(
+    model=_settings.model_name,
+    api_key=_settings.openai_api_key,
+    rate_limiter=shared_rate_limiter,
+    max_retries=6,
+)
 _structured_llm = _llm.with_structured_output(ReportSections)
 
 _SYSTEM_PROMPT = """\
@@ -57,16 +62,15 @@ _SYSTEM_PROMPT = """\
    - 4.3 투자·협력 의견 : 투자 매력도·리스크·협력 가능 영역, 2문단 이상
 
 3. REFERENCE (맨 마지막)
-   - 반드시 아래 [수집된 출처 목록]에 있는 자료만 기재하세요.
-   - 목록에 없는 URL을 추측하거나 임의로 생성하지 마세요.
-   - 웹페이지·뉴스·기관 보고서 등 온라인 자료는 URL을 반드시 포함하세요.
-     URL이 [수집된 출처 목록]에 없으면 해당 자료는 기재하지 마세요.
-   - URL이 원천적으로 없는 자료(오프라인 PDF, 학술지 논문 등)만 URL 없이 작성하세요.
-   - 기관 보고서 : 발행기관(YYYY). 보고서명. URL
-   - 학술 논문  : 저자(YYYY). 논문제목. 학술지명, 권(호), 페이지.
-   - 웹페이지   : 기관명 또는 작성자(YYYY-MM-DD). 제목. URL
+   - [RAG 문서 출처]에 있는 자료는 예외 없이 전부 기재하세요. (필수)
+   - [웹 검색 출처 목록]에서 URL이 있는 자료를 추가로 기재하세요.
+   - 위 두 목록에 없는 자료는 절대 추측하거나 임의로 생성하지 마세요.
+   - 기관 보고서·PDF : 발행기관 또는 회사명. 문서명. URL 또는 파일 경로
+   - 웹페이지·뉴스   : 기관명 또는 작성자(YYYY-MM-DD). 제목. URL
 
 모든 내용은 한국어로 작성하고, 수치와 근거를 구체적으로 포함하세요.
+각 섹션 내부에 마크다운 헤딩(#, ##, ###)을 사용하지 마세요. 보고서 구조는 이미 템플릿에 정의되어 있습니다.
+균형 분석 원칙: 각 기업의 강점뿐 아니라 실적 부진·수익성 압박·기술 한계·경쟁사 위협·규제 리스크 등 부정적 측면을 반드시 동등하게 서술하세요.
 """
 
 # ---------------------------------------------------------------------------
@@ -74,21 +78,41 @@ _SYSTEM_PROMPT = """\
 # ---------------------------------------------------------------------------
 
 def generate_sections_node(state: ReportState) -> dict:
-    # 실제 수집된 출처 목록을 컨텍스트에 포함
+    # ── RAG 출처 (필수 참고문헌) ─────────────────────────────────────────
+    rag_source_lines = []
+    for s in state.get("rag_sources", []):
+        source = s.get("source", "")
+        company = s.get("company", "")
+        filename = s.get("filename", "")
+        label = f"[{company}] " if company else ""
+        display = filename if filename else source
+        rag_source_lines.append(f"- {label}{display} | {source}")
+
+    rag_block = (
+        "\n\n[RAG 문서 출처 — 반드시 REFERENCE에 모두 포함할 것]\n"
+        + "\n".join(rag_source_lines)
+        if rag_source_lines else ""
+    )
+
+    # ── 웹 검색 출처 (URL 있는 것만, URL 기준 중복 제거) ──────────────────
     market_sources = state.get("market_sources", {})
+    seen_urls: set[str] = set()
     source_lines = []
     for company, sources in market_sources.items():
         for s in sources:
             url = s.get("url", "")
             title = s.get("title", "")
-            if url:
+            if url and url not in seen_urls:
+                seen_urls.add(url)
                 source_lines.append(f"- [{company}] {title} | {url}" if title else f"- [{company}] {url}")
 
-    sources_block = (
-        "\n\n[수집된 출처 목록 — REFERENCE는 이 목록에 있는 URL만 사용]\n"
+    web_block = (
+        "\n\n[웹 검색 출처 목록 — URL이 있는 자료만 REFERENCE에 포함]\n"
         + "\n".join(source_lines)
         if source_lines else ""
     )
+
+    sources_block = rag_block + web_block
 
     context = "\n\n".join([
         "=== 기업별 분석 보고서 ===",
@@ -124,13 +148,14 @@ def _check_url(url: str, timeout: int = 5) -> bool:
 
 
 def validate_references_node(state: ReportState) -> dict:
-    """sections.references의 URL을 HTTP 요청으로 검증하고 유효하지 않은 항목을 제거한다."""
+    """sections.references의 URL을 HTTP 요청으로 검증하고, 유효하지 않은 항목과 중복을 제거한다."""
     sections: ReportSections = state["sections"]
+
+    # ── 1단계: URL 유효성 검사 ────────────────────────────────────────────
     valid_refs: list[str] = []
     for ref in sections.references:
         urls = _URL_RE.findall(ref)
         if not urls:
-            # URL 없는 항목(논문 등)은 그대로 유지
             valid_refs.append(ref)
             continue
         if all(_check_url(url) for url in urls):
@@ -138,7 +163,28 @@ def validate_references_node(state: ReportState) -> dict:
         else:
             print(f"[validate_references] 유효하지 않은 URL 제거: {ref[:80]}")
 
-    sections.references = valid_refs
+    # ── 2단계: 중복 제거 (URL 기준, 없으면 텍스트 기준) ──────────────────
+    seen_urls: set[str] = set()
+    seen_texts: set[str] = set()
+    deduped: list[str] = []
+    for ref in valid_refs:
+        urls = _URL_RE.findall(ref)
+        if urls:
+            new_urls = [u for u in urls if u not in seen_urls]
+            if new_urls:
+                seen_urls.update(urls)
+                deduped.append(ref)
+            else:
+                print(f"[validate_references] 중복 참고문헌 제거: {ref[:80]}")
+        else:
+            key = ref.strip().lower()
+            if key not in seen_texts:
+                seen_texts.add(key)
+                deduped.append(ref)
+            else:
+                print(f"[validate_references] 중복 참고문헌 제거: {ref[:80]}")
+
+    sections.references = deduped
     return {"sections": sections}
 
 
@@ -161,7 +207,8 @@ body {
 
 /* 제목 */
 .report-title { font-size: 22pt; font-weight: 700; color: #1a1a2e; margin-bottom: 4pt; }
-.report-subtitle { font-size: 12pt; color: #4a4a6a; margin-bottom: 16pt; }
+.report-subtitle { font-size: 12pt; color: #4a4a6a; margin-bottom: 4pt; }
+.report-author { font-size: 10pt; color: #6a6a8a; margin-bottom: 16pt; }
 .divider { border: none; border-top: 2px solid #2d2d5e; margin: 12pt 0; }
 .section-divider { border: none; border-top: 0.5px solid #ccccdd; margin: 14pt 0; }
 
@@ -206,9 +253,43 @@ tr:nth-child(even) td { background: #f9f9ff; }
 """
 
 
+_MD_HEADING_RE = re.compile(r'^(#{1,4})\s+(.+)$')
+
+
 def _p(text: str) -> str:
-    """문단 텍스트를 <p> 태그로 감싼다. 빈 줄 기준으로 분리."""
-    return "".join(f"<p>{para.strip()}</p>" for para in text.split("\n\n") if para.strip())
+    """문단 텍스트를 HTML로 변환한다.
+
+    - 빈 줄 기준으로 문단 분리
+    - 마크다운 헤딩(## / ###) → <h3> / <h4> 변환
+    - 그 외 줄은 <p> 태그로 감쌈
+    """
+    result = []
+    for para in text.split("\n\n"):
+        para = para.strip()
+        if not para:
+            continue
+        html_lines = []
+        has_heading = False
+        plain_buf: list[str] = []
+
+        def _flush_plain():
+            if plain_buf:
+                html_lines.append(f"<p>{' '.join(plain_buf)}</p>")
+                plain_buf.clear()
+
+        for line in para.split("\n"):
+            m = _MD_HEADING_RE.match(line.strip())
+            if m:
+                _flush_plain()
+                level = min(len(m.group(1)) + 1, 4)  # # → h2, ## → h3, ### → h4
+                html_lines.append(f"<h{level}>{m.group(2).strip()}</h{level}>")
+                has_heading = True
+            elif line.strip():
+                plain_buf.append(line.strip())
+        _flush_plain()
+
+        result.append("".join(html_lines) if has_heading else f"<p>{para}</p>")
+    return "".join(result)
 
 
 def _strategy_table(s: ReportSections) -> str:
@@ -263,6 +344,7 @@ def render_html_node(state: ReportState) -> dict:
 
 <p class="report-title">배터리 기업 전략 분석 보고서</p>
 <p class="report-subtitle">CATL vs LG에너지솔루션</p>
+<p class="report-author">Cloud 1기 배민준</p>
 <hr class="divider">
 
 <h1>SUMMARY</h1>
@@ -383,6 +465,7 @@ def report_generation_agent(state) -> dict:
         "company_report":    state.get("company_report", {}),
         "comparison_report": state.get("comparison_report", ""),
         "market_sources":    state.get("market_sources", {}),
+        "rag_sources":       state.get("rag_sources", []),
         "sections":          None,
         "final_report":      "",
         "report_pdf_path":   "",

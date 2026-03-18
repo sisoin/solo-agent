@@ -53,23 +53,23 @@ class ReportSections(BaseModel):
     # 2. 기업별 포트폴리오
     lg_portfolio: str   = Field(description=(
         "2.1.1 LG에너지솔루션 사업 포트폴리오 구성. 400자 이상. "
-        "파우치·원통형·각형 폼팩터 비중, EV·ESS·소형전지 매출 구조, "
-        "주요 고객사(OEM) 및 JV 현황을 3문단 이상 서술."
+        "파우치·원통형·각형 폼팩터 비중, EV·ESS·소형전지 매출 구조, 주요 고객사(OEM) 및 JV 현황을 서술. "
+        "매출 부진·고객 이탈·가동률 하락 등 부정적 사업 현황도 반드시 포함. 3문단 이상."
     ))
     lg_tech: str        = Field(description=(
         "2.1.2 LG에너지솔루션 기술 경쟁력. 400자 이상. "
-        "NCM·NCMA 양극재 기술, 건식전극 공정, 전고체 배터리 개발 로드맵, "
-        "BMS 및 셀 설계 특허 강점을 3문단 이상 서술."
+        "NCM·NCMA 양극재 기술, 건식전극 공정, 전고체 배터리 개발 로드맵, BMS 강점을 서술. "
+        "기술 격차·상용화 지연·경쟁사 대비 열위 항목 등 기술적 한계도 반드시 포함. 3문단 이상."
     ))
     catl_portfolio: str = Field(description=(
         "2.2.1 CATL 사업 포트폴리오 구성. 400자 이상. "
-        "LFP·NCM·나트륨이온 배터리 라인업, 각형 셀 주력 폼팩터, "
-        "글로벌 주요 OEM 고객사 및 해외 공장 현황을 3문단 이상 서술."
+        "LFP·NCM·나트륨이온 배터리 라인업, 각형 셀 주력 폼팩터, 글로벌 주요 OEM 고객사 및 해외 공장 현황을 서술. "
+        "북미 시장 규제 리스크·수익성 압박·지정학적 리스크 등 부정적 사업 현황도 반드시 포함. 3문단 이상."
     ))
     catl_tech: str      = Field(description=(
         "2.2.2 CATL 기술 경쟁력. 400자 이상. "
-        "셀투팩(CTP) 기술, 기린 배터리(Kirin), 나트륨이온·불소리튬(NFPP) 차세대 배터리, "
-        "생산 자동화 및 원가 절감 공정 혁신을 3문단 이상 서술."
+        "셀투팩(CTP) 기술, 기린 배터리(Kirin), 나트륨이온·불소리튬(NFPP) 차세대 배터리, 공정 혁신을 서술. "
+        "고밀도 배터리 분야 경쟁사 대비 열위·전고체 기술 격차 등 기술적 한계도 반드시 포함. 3문단 이상."
     ))
 
     # 3. 전략 비교
@@ -122,6 +122,7 @@ class ReportState(TypedDict):
     company_report: dict[str, str]
     comparison_report: str
     market_sources: dict[str, list]  # 기업별 웹 검색 출처 목록
+    rag_sources: list[dict]          # RAG 문서 출처 목록 — 반드시 참고문헌에 포함
 
     # ── 구조화 섹션 (중간 산출물) ─────────────────────────────────────────
     sections: ReportSections | None

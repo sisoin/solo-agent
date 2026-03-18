@@ -83,7 +83,20 @@ def retrieve_node(state: BatteryMarketState) -> dict:
         chars = len(doc.page_content)
         print(f"  [{i}] {source} p.{page} ({chars}자)")
 
-    return {"retrieved_docs": unique_docs}
+    # 문서별 출처를 source 기준 중복 제거하여 rag_sources로 추출
+    source_seen: set[str] = set()
+    rag_sources: list[dict] = []
+    for doc in unique_docs:
+        source = doc.metadata.get("source", "")
+        if source and source not in source_seen:
+            source_seen.add(source)
+            rag_sources.append({
+                "source":   source,
+                "company":  doc.metadata.get("company", ""),
+                "filename": doc.metadata.get("filename", ""),
+            })
+
+    return {"retrieved_docs": unique_docs, "rag_sources": rag_sources}
 
 
 def analyze_company_node(state: BatteryMarketState) -> dict:

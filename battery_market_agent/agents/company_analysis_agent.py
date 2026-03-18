@@ -29,7 +29,7 @@ from langgraph_supervisor import create_supervisor
 
 import re
 
-from battery_market_agent.config import Settings
+from battery_market_agent.config import Settings, shared_rate_limiter
 from battery_market_agent.rag import BatteryRAG
 
 _URL_RE = re.compile(r"https?://[^\s'\"\)\]>,<]+")
@@ -53,6 +53,8 @@ _settings = Settings()
 _llm = ChatOpenAI(
     model=_settings.model_name,
     api_key=_settings.openai_api_key,
+    rate_limiter=shared_rate_limiter,
+    max_retries=6,
 )
 
 # ---------------------------------------------------------------------------
@@ -132,7 +134,12 @@ _SUPERVISOR_PROMPT = (
     "  최신성이 필요한 항목(시장 규모, 원자재 가격, 뉴스)은 반드시 웹서치로 보완하세요.\n"
     "- 세 에이전트를 순서대로 호출하여 각 분석을 완료하세요.\n"
     "- 모든 에이전트 결과를 수집한 뒤 종합 기업 보고서를 작성하세요.\n"
-    "- 보고서 형식은 미정이므로 수집 정보를 구조화하여 전달하세요."
+    "- 보고서 형식은 미정이므로 수집 정보를 구조화하여 전달하세요.\n\n"
+    "균형 분석 원칙 (필수):\n"
+    "- 긍정적 성과(수주·성장·기술 강점)와 부정적 측면(리스크·한계·약점)을 반드시 함께 서술하세요.\n"
+    "- 부정적 측면 예시: 실적 악화·적자, 고객 이탈, 공급망 차질, 가동률 하락, 경쟁사 위협,\n"
+    "  소송·리콜, 수익성 압박, 기술 격차, 원자재 의존도, 규제 리스크.\n"
+    "- 긍정 정보만 강조하는 보고서는 불완전한 분석입니다. 부정적 사실도 동등하게 비중 있게 다루세요."
 )
 
 company_supervisor = create_supervisor(
@@ -178,14 +185,27 @@ def _format_section(title: str, docs: list, max_docs: int, offset: int = 0) -> t
 
 
 def _format_rag_context(common_docs: list, company_docs: list) -> str:
-    """공통 문서와 회사별 문서를 섹션 구분하여 supervisor 전달용 문자열로 포맷한다."""
+    """공통 문서와 회사별 문서를 섹션 구분하여 supervisor 전달용 문자열로 포맷한다.
+
+    company_docs에서 common_docs와 source+page가 겹치는 문서는 제외한다.
+    """
     if not common_docs and not company_docs:
         print("[_format_rag_context] retrieved_docs 없음 — RAG 컨텍스트 미사용")
         return ""
 
+    # 공통 문서 key set으로 회사별 중복 제거
+    common_keys = {
+        f"{d.metadata.get('source', '')}_{d.metadata.get('page', '')}"
+        for d in common_docs
+    }
+    deduped_company_docs = [
+        d for d in company_docs
+        if f"{d.metadata.get('source', '')}_{d.metadata.get('page', '')}" not in common_keys
+    ]
+
     print(f"[_format_rag_context] 공통 {len(common_docs)}개 중 최대 {_RAG_COMMON_MAX_DOCS}개, "
-          f"회사별 {len(company_docs)}개 중 최대 {_RAG_COMPANY_MAX_DOCS}개 사용 "
-          f"(문서당 최대 {_RAG_MAX_CHARS}자)")
+          f"회사별 {len(deduped_company_docs)}개 중 최대 {_RAG_COMPANY_MAX_DOCS}개 사용 "
+          f"(중복 {len(company_docs) - len(deduped_company_docs)}개 제외, 문서당 최대 {_RAG_MAX_CHARS}자)")
 
     lines = ["[RAG 컨텍스트 — 사전 수집된 배터리 산업 배경 지식]"]
 
@@ -194,9 +214,9 @@ def _format_rag_context(common_docs: list, company_docs: list) -> str:
     )
     lines.extend(section_lines)
 
-    if company_docs:
+    if deduped_company_docs:
         section_lines, _ = _format_section(
-            "회사별 — 기술·전략 문서", company_docs, _RAG_COMPANY_MAX_DOCS, offset=used_common
+            "회사별 — 기술·전략 문서", deduped_company_docs, _RAG_COMPANY_MAX_DOCS, offset=used_common
         )
         lines.extend(section_lines)
 

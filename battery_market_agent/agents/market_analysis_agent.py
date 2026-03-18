@@ -24,7 +24,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import create_react_agent
 
-from battery_market_agent.config.settings import Settings, shared_rate_limiter
+from battery_market_agent.config.settings import Settings, analysis_rate_limiter
 from battery_market_agent.state import BatteryMarketState
 from battery_market_agent.tools import search_web, fetch_google_news, fetch_price_trends
 
@@ -34,9 +34,9 @@ from battery_market_agent.tools import search_web, fetch_google_news, fetch_pric
 
 _settings = Settings()
 _llm = ChatOpenAI(
-    model=_settings.model_name,
+    model=_settings.analysis_model_name,
     api_key=_settings.openai_api_key,
-    rate_limiter=shared_rate_limiter,
+    rate_limiter=analysis_rate_limiter,
     max_retries=6,
 )
 

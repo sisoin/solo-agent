@@ -1,20 +1,28 @@
 from pydantic_settings import BaseSettings
 from langchain_core.rate_limiters import InMemoryRateLimiter
 
-# 모든 에이전트가 공유하는 rate limiter — 모듈 로드 시 한 번만 생성
-# TPM 30,000 기준: gpt-4o 1호출 ≈ 4,000~5,000 토큰
-# → 안전 마진 포함 분당 5회 = 초당 0.08회 (≈ 12초에 1회)
+# 보고서 생성(gpt-4o) 전용 rate limiter
+# TPM 30,000 기준: 1호출 ≈ 4,000~5,000 토큰 → 분당 6회 → 초당 0.1회
 shared_rate_limiter = InMemoryRateLimiter(
-    requests_per_second=0.08,
+    requests_per_second=0.1,
     check_every_n_seconds=0.1,
     max_bucket_size=2,
+)
+
+# 분석 에이전트(gpt-4o-mini) 전용 rate limiter
+# TPM 200,000 기준: 1호출 ≈ 3,000~4,000 토큰 → 분당 50회 → 초당 0.5회
+analysis_rate_limiter = InMemoryRateLimiter(
+    requests_per_second=0.5,
+    check_every_n_seconds=0.05,
+    max_bucket_size=5,
 )
 
 
 class Settings(BaseSettings):
     # LLM
     openai_api_key: str = ""
-    model_name: str = "gpt-4o"
+    model_name: str = "gpt-4o"           # 보고서 생성 에이전트용
+    analysis_model_name: str = "gpt-4o-mini"  # 분석 에이전트용
 
     # RAG / 벡터 저장소
     vector_store_path: str = "./data/vectorstore"

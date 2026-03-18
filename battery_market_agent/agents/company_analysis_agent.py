@@ -29,7 +29,7 @@ from langgraph_supervisor import create_supervisor
 
 import re
 
-from battery_market_agent.config import Settings, shared_rate_limiter
+from battery_market_agent.config import Settings, analysis_rate_limiter
 from battery_market_agent.rag import BatteryRAG
 
 _URL_RE = re.compile(r"https?://[^\s'\"\)\]>,<]+")
@@ -51,9 +51,9 @@ from battery_market_agent.agents.swot_analysis_agent import (
 
 _settings = Settings()
 _llm = ChatOpenAI(
-    model=_settings.model_name,
+    model=_settings.analysis_model_name,
     api_key=_settings.openai_api_key,
-    rate_limiter=shared_rate_limiter,
+    rate_limiter=analysis_rate_limiter,
     max_retries=6,
 )
 

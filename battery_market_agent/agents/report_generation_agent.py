@@ -65,7 +65,7 @@ _SYSTEM_PROMPT = """\
    - [RAG 문서 출처]에 있는 자료는 예외 없이 전부 기재하세요. (필수)
    - [웹 검색 출처 목록]에서 URL이 있는 자료를 추가로 기재하세요.
    - 위 두 목록에 없는 자료는 절대 추측하거나 임의로 생성하지 마세요.
-   - 기관 보고서·PDF : 발행기관 또는 회사명. 문서명. URL 또는 파일 경로
+   - 기관 보고서·PDF : 발행기관 또는 회사명. 문서명. (URL이 있는 경우에만 URL 기재)
    - 웹페이지·뉴스   : 기관명 또는 작성자(YYYY-MM-DD). 제목. URL
 
 모든 내용은 한국어로 작성하고, 수치와 근거를 구체적으로 포함하세요.
@@ -86,7 +86,7 @@ def generate_sections_node(state: ReportState) -> dict:
         filename = s.get("filename", "")
         label = f"[{company}] " if company else ""
         display = filename if filename else source
-        rag_source_lines.append(f"- {label}{display} | {source}")
+        rag_source_lines.append(f"- {label}{display}")
 
     rag_block = (
         "\n\n[RAG 문서 출처 — 반드시 REFERENCE에 모두 포함할 것]\n"

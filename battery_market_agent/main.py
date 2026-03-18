@@ -6,7 +6,7 @@ from battery_market_agent.agents import build_graph
 
 async def run(query: str) -> dict:
     graph = build_graph()
-    result = await graph.ainvoke({"query": query})
+    result = await graph.ainvoke({"query": query}, config={"max_concurrency": 2})
     return result
 
 

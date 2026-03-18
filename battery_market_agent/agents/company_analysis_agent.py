@@ -59,9 +59,9 @@ _llm = ChatOpenAI(
 # ---------------------------------------------------------------------------
 
 @tool
-def run_swot_analysis(company: str) -> str:
+async def run_swot_analysis(company: str) -> str:
     """SWOT 분석 서브그래프를 실행하여 2×2 SWOT 행렬 문자열을 반환합니다."""
-    result = swot_subgraph.invoke({
+    result = await swot_subgraph.ainvoke({
         "subject":  company,
         "raw_info": [],
         "criteria": {
@@ -238,7 +238,7 @@ def _retrieve_company_docs(company: str) -> list:
     return docs
 
 
-def company_analysis_agent(state) -> dict:
+async def company_analysis_agent(state) -> dict:
     """
     기업 분석 Supervisor 노드.
 
@@ -246,7 +246,7 @@ def company_analysis_agent(state) -> dict:
     최종 메시지를 state["company_report"][company]에 저장한다.
     Rate Limit 에러 시 최대 3회 재시도(지수 백오프)한다.
     """
-    import time
+    import asyncio
     from openai import RateLimitError
 
     company = state["company"]
@@ -263,7 +263,7 @@ def company_analysis_agent(state) -> dict:
 
     for attempt in range(3):
         try:
-            result = company_supervisor.invoke({
+            result = await company_supervisor.ainvoke({
                 "messages": [("user", user_message)]
             })
             break
@@ -272,7 +272,7 @@ def company_analysis_agent(state) -> dict:
                 raise
             wait = 30 * (attempt + 1)
             print(f"[company_analysis_agent] Rate limit 초과, {wait}초 후 재시도... ({attempt+1}/3)")
-            time.sleep(wait)
+            await asyncio.sleep(wait)
 
     company_report = state.get("company_report", {})
     company_report[company] = result["messages"][-1].content

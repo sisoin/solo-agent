@@ -41,12 +41,12 @@ _SYSTEM_PROMPT = """\
 2. 본문 필수 포함 항목 및 분량 기준
    ※ 각 항목은 아래 최소 분량을 반드시 충족하세요. 수치·사례·근거를 구체적으로 포함할수록 좋습니다.
 
-   [1장 시장 배경] — 항목당 400자 이상
+   [1장 시장 배경] — 항목당 700자 이상, 3문단 이상
    - 1.1 시장 현황·규모 : 달러 규모, CAGR, 성장 드라이버 수치 포함, 3문단 이상
-   - 1.2 시장 구조 변화 : LFP·NCM 점유율 변화, 전고체·ESS 동향 등 3개 이상 트렌드
+   - 1.2 시장 구조 변화 : LFP·NCM 점유율 변화, 전고체·ESS 동향 등 3개 이상 트렌드, 3문단 이상
    - 1.3 경쟁 구도      : Top 5 점유율 수치, CATL·LGES 포지션 비교, 3문단 이상
 
-   [2장 기업별 포트폴리오] — 항목당 400자 이상
+   [2장 기업별 포트폴리오] — 항목당 700자 이상, 3문단 이상
    - LG에너지솔루션 포트폴리오 : 폼팩터별 비중, 고객사·JV 현황, 3문단 이상
    - LG에너지솔루션 기술       : NCM·NCMA·건식전극·전고체 로드맵, 3문단 이상
    - CATL 포트폴리오           : LFP·NCM·나트륨이온 라인업, 고객사·해외공장, 3문단 이상
@@ -56,10 +56,10 @@ _SYSTEM_PROMPT = """\
    - 전략 비교표 5개 항목 (기술·지역·고객·원가·신사업)
    - SWOT: 내부(S/W) + 외부(O/T) 구분, 각 항목 2문장 이상
 
-   [4장 종합 시사점] — 항목당 350자 이상
-   - 4.1 포지셔닝 차이  : 지역·화학·고객 3축 비교, 수치 포함
-   - 4.2 시장 전망      : 2025~2030 전망, 기회·리스크 균형 서술
-   - 4.3 투자·협력 의견 : 투자 매력도·리스크·협력 가능 영역, 2문단 이상
+   [4장 종합 시사점] — 항목당 700자 이상, 3문단 이상
+   - 4.1 포지셔닝 차이  : 지역·화학·고객 3축 비교, 수치 포함, 3문단 이상
+   - 4.2 시장 전망      : 2025~2030 전망, 기회·리스크 균형 서술, 3문단 이상
+   - 4.3 투자·협력 의견 : 투자 매력도·리스크·협력 가능 영역, 3문단 이상
 
 3. REFERENCE (맨 마지막)
    - [RAG 문서 출처]에 있는 자료는 예외 없이 전부 기재하세요. (필수)
@@ -122,7 +122,36 @@ def generate_sections_node(state: ReportState) -> dict:
     ]) + sources_block
 
     prompt = f"{_SYSTEM_PROMPT}\n\n{context}"
-    sections: ReportSections = _structured_llm.invoke(prompt)
+
+    # 분량 기준: 700자 이상, 3문단 이상 — 최대 5회 시도
+    _LONG_FIELDS = [
+        "market_overview", "market_trends", "competitive_landscape",
+        "lg_portfolio", "lg_tech", "catl_portfolio", "catl_tech",
+        "positioning_diff", "market_outlook", "investment_opinion",
+    ]
+    _MIN_CHARS = 700
+    _MIN_PARAS = 3
+    _MAX_ATTEMPTS = 5
+
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        sections: ReportSections = _structured_llm.invoke(prompt)
+
+        failed = []
+        for field in _LONG_FIELDS:
+            text: str = getattr(sections, field, "") or ""
+            chars = len(text)
+            paras = len([p for p in text.split("\n\n") if p.strip()])
+            if chars < _MIN_CHARS or paras < _MIN_PARAS:
+                failed.append(f"{field}(현재 {chars}자/{paras}문단)")
+
+        if not failed:
+            print(f"[generate_sections_node] 분량 검증 통과 (시도 {attempt}/{_MAX_ATTEMPTS})")
+            break
+
+        print(f"[generate_sections_node] 분량 미달 {len(failed)}개, 재생성 ({attempt}/{_MAX_ATTEMPTS}): {failed}")
+        if attempt == _MAX_ATTEMPTS:
+            print("[generate_sections_node] 최대 시도 횟수 도달, 현재 결과 사용")
+
     return {"sections": sections}
 
 

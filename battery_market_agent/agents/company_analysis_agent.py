@@ -36,9 +36,6 @@ _URL_RE = re.compile(r"https?://[^\s'\"\)\]>,<]+")
 from battery_market_agent.tools import (
     search_web,
     fetch_google_news,
-    fetch_price_trends,
-    search_battery_market_data,
-    summarize_regulations,
 )
 from battery_market_agent.agents.market_analysis_agent import _agent as market_agent_graph
 from battery_market_agent.agents.swot import swot_subgraph

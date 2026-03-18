@@ -26,7 +26,6 @@ from langchain_core.documents import Document
 
 from battery_market_agent.config import Settings, analysis_rate_limiter
 from battery_market_agent.rag import BatteryRAG
-from battery_market_agent.state import TechAnalysisState
 
 # ---------------------------------------------------------------------------
 # 설정
@@ -134,7 +133,7 @@ SYSTEM_PROMPT = """당신은 배터리 기술 전문 분석가입니다.
 # 노드
 # ---------------------------------------------------------------------------
 
-def tech_analysis_agent(state: TechAnalysisState) -> dict:
+def tech_analysis_agent(state: dict) -> dict:
     """
     기술 분석 에이전트 노드.
 

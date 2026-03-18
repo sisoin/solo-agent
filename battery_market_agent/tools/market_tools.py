@@ -4,7 +4,6 @@
 각 함수는 @tool (LangChain)로 데코레이팅되어
 에이전트의 도구 목록에 직접 전달됩니다.
 """
-import datetime
 from langchain_core.tools import tool
 import yfinance as yf
 
@@ -91,38 +90,3 @@ def fetch_price_trends(material: str, period: str = "1y") -> str:
     )
 
 
-@tool
-def search_battery_market_data(query: str) -> str:
-    """
-    배터리 시장 규모, 성장률, 세그먼트 데이터를 검색합니다.
-    (현재 웹 검색 위임 — search_web 도구를 대신 사용하세요.)
-    """
-    return (
-        "이 도구는 현재 웹 검색으로 대체됩니다. "
-        "search_web 도구로 동일한 쿼리를 실행하세요: " + query
-    )
-
-
-@tool
-def analyze_competitors(company_names: list[str]) -> str:
-    """
-    지정된 배터리 기업들의 경쟁 포지셔닝을 분석합니다.
-    (현재 웹 검색 위임 — search_web 도구를 대신 사용하세요.)
-    """
-    names = ", ".join(company_names)
-    return (
-        f"이 도구는 현재 웹 검색으로 대체됩니다. "
-        f"search_web 도구로 '{names} 경쟁 포지셔닝 비교'를 검색하세요."
-    )
-
-
-@tool
-def summarize_regulations(region: str) -> str:
-    """
-    특정 지역의 배터리 관련 규제 및 정책을 요약합니다.
-    (현재 웹 검색 위임 — search_web 도구를 대신 사용하세요.)
-    """
-    return (
-        f"이 도구는 현재 웹 검색으로 대체됩니다. "
-        f"search_web 도구로 '{region} 배터리 규제 정책'을 검색하세요."
-    )

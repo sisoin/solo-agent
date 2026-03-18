@@ -25,7 +25,6 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import create_react_agent
 
 from battery_market_agent.config.settings import Settings, analysis_rate_limiter
-from battery_market_agent.state import BatteryMarketState
 from battery_market_agent.tools import search_web, fetch_google_news, fetch_price_trends
 
 # ---------------------------------------------------------------------------
@@ -125,36 +124,3 @@ def _extract_sources(messages: list, tool_name: str) -> list[dict[str, str]]:
     return sources
 
 
-# ---------------------------------------------------------------------------
-# 노드
-# ---------------------------------------------------------------------------
-
-def market_analysis_agent(state: BatteryMarketState) -> dict:
-    """
-    시장 분석 에이전트 노드.
-
-    create_react_agent로 빌드된 ReAct 루프를 실행하여
-    웹 검색 결과를 기반으로 배터리 시장 동향을 수집·분석한다.
-    """
-    company = state["company"]
-
-    result = _agent.invoke({
-        "messages": [
-            ("user", f"{company}의 현재 배터리 시장 동향을 위 항목에 따라 분석해주세요.")
-        ]
-    })
-
-    messages = result["messages"]
-
-    # 출처 수집: search_web, fetch_google_news 각각 파싱
-    sources: list[dict[str, str]] = []
-    for tool_name in ("search_web", "fetch_google_news"):
-        sources.extend(_extract_sources(messages, tool_name))
-
-    market_trends = state.get("market_trends", {})
-    market_trends[company] = messages[-1].content
-
-    market_sources = state.get("market_sources", {})
-    market_sources[company] = sources
-
-    return {"market_trends": market_trends, "market_sources": market_sources}

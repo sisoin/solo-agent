@@ -35,10 +35,6 @@ class BatteryMarketState(TypedDict):
     {"LG에너지솔루션": "<보고서>", "CATL": "<보고서>"}
     두 병렬 브랜치가 각각 단일 키를 반환하며 _merge_dicts로 합산된다."""
 
-    market_trends: Annotated[dict[str, str], _merge_dicts]
-    """기업별 시장 동향 분석 텍스트.
-    {"LG에너지솔루션": "<분석>", "CATL": "<분석>"}"""
-
     market_sources: Annotated[dict[str, list], _merge_dicts]
     """기업별 웹 검색 출처 목록.
     {"LG에너지솔루션": [{"title", "url", "tool"}, ...], "CATL": [...]}"""

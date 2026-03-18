@@ -122,36 +122,7 @@ def generate_sections_node(state: ReportState) -> dict:
     ]) + sources_block
 
     prompt = f"{_SYSTEM_PROMPT}\n\n{context}"
-
-    # 분량 기준: 700자 이상, 3문단 이상 — 최대 5회 시도
-    _LONG_FIELDS = [
-        "market_overview", "market_trends", "competitive_landscape",
-        "lg_portfolio", "lg_tech", "catl_portfolio", "catl_tech",
-        "positioning_diff", "market_outlook", "investment_opinion",
-    ]
-    _MIN_CHARS = 700
-    _MIN_PARAS = 3
-    _MAX_ATTEMPTS = 5
-
-    for attempt in range(1, _MAX_ATTEMPTS + 1):
-        sections: ReportSections = _structured_llm.invoke(prompt)
-
-        failed = []
-        for field in _LONG_FIELDS:
-            text: str = getattr(sections, field, "") or ""
-            chars = len(text)
-            paras = len([p for p in text.split("\n\n") if p.strip()])
-            if chars < _MIN_CHARS or paras < _MIN_PARAS:
-                failed.append(f"{field}(현재 {chars}자/{paras}문단)")
-
-        if not failed:
-            print(f"[generate_sections_node] 분량 검증 통과 (시도 {attempt}/{_MAX_ATTEMPTS})")
-            break
-
-        print(f"[generate_sections_node] 분량 미달 {len(failed)}개, 재생성 ({attempt}/{_MAX_ATTEMPTS}): {failed}")
-        if attempt == _MAX_ATTEMPTS:
-            print("[generate_sections_node] 최대 시도 횟수 도달, 현재 결과 사용")
-
+    sections: ReportSections = _structured_llm.invoke(prompt)
     return {"sections": sections}
 
 
